@@ -265,13 +265,18 @@ func (e EnumServiceStatusProcess) String() string {
 	return fmt.Sprintf(format, e.ServiceName, e.DisplayName, e.ServiceStatusProcess)
 }
 
+// https://msdn.microsoft.com/en-us/library/windows/desktop/ms684276(v=vs.85).aspx
 type ServiceNotification uint32
 
 const (
-	SERVICE_NOTIFY_CREATED          ServiceNotification = 0x00000080
+
+	// SCM handle only.
+	SERVICE_NOTIFY_CREATED ServiceNotification = 0x00000080
+	SERVICE_NOTIFY_DELETED ServiceNotification = 0x00000100
+
+	// Service handle only.
 	SERVICE_NOTIFY_CONTINUE_PENDING ServiceNotification = 0x00000010
 	SERVICE_NOTIFY_DELETE_PENDING   ServiceNotification = 0x00000200
-	SERVICE_NOTIFY_DELETED          ServiceNotification = 0x00000100
 	SERVICE_NOTIFY_PAUSE_PENDING    ServiceNotification = 0x00000020
 	SERVICE_NOTIFY_PAUSED           ServiceNotification = 0x00000040
 	SERVICE_NOTIFY_RUNNING          ServiceNotification = 0x00000008
@@ -282,9 +287,9 @@ const (
 
 var serviceNotificationMap = map[ServiceNotification]string{
 	SERVICE_NOTIFY_CREATED:          "SERVICE_NOTIFY_CREATED",
+	SERVICE_NOTIFY_DELETED:          "SERVICE_NOTIFY_DELETED",
 	SERVICE_NOTIFY_CONTINUE_PENDING: "SERVICE_NOTIFY_CONTINUE_PENDING",
 	SERVICE_NOTIFY_DELETE_PENDING:   "SERVICE_NOTIFY_DELETE_PENDING",
-	SERVICE_NOTIFY_DELETED:          "SERVICE_NOTIFY_DELETED",
 	SERVICE_NOTIFY_PAUSE_PENDING:    "SERVICE_NOTIFY_PAUSE_PENDING",
 	SERVICE_NOTIFY_PAUSED:           "SERVICE_NOTIFY_PAUSED",
 	SERVICE_NOTIFY_RUNNING:          "SERVICE_NOTIFY_RUNNING",
@@ -354,23 +359,18 @@ func (s SERVICE_NOTIFY) String() string {
 }
 
 type ServiceNotify struct {
-	Version               uint32
-	NotifyCallback        uintptr
-	Context               uintptr
 	NotificationStatus    errno.Errno
 	ServiceStatus         SERVICE_STATUS_PROCESS
 	NotificationTriggered ServiceNotification
-	ServiceNames          string
+	ServiceNames          []string
 }
 
 func (s ServiceNotify) String() string {
-	const format = "{Version: %X, NotifyCallback: %X, Context: %X, " +
-		"NotificationStatus: %s, ServiceStatus: {%s}, " +
-		"NotificationTriggered: %s, ServiceNames: %s}"
+	const format = "NotificationStatus: %s, ServiceStatus: {%s}, " +
+		"NotificationTriggered: %s, ServiceNames: [%s]}"
 
-	return fmt.Sprintf(format, s.Version, s.NotifyCallback, s.Context,
-		s.NotificationStatus, s.ServiceStatus, s.NotificationTriggered,
-		s.ServiceNames)
+	return fmt.Sprintf(format, s.NotificationStatus, s.ServiceStatus,
+		s.NotificationTriggered, strings.Join(s.ServiceNames, ", "))
 }
 
 func newServiceNotify(n *SERVICE_NOTIFY) *ServiceNotify {
@@ -378,13 +378,10 @@ func newServiceNotify(n *SERVICE_NOTIFY) *ServiceNotify {
 		return nil
 	}
 	s := &ServiceNotify{
-		Version:               n.Version,
-		NotifyCallback:        n.NotifyCallback,
-		Context:               n.Context,
 		NotificationStatus:    errno.Errno(n.NotificationStatus),
 		ServiceStatus:         n.ServiceStatus,
 		NotificationTriggered: n.NotificationTriggered,
-		ServiceNames:          UTF16ToString(n.ServiceNames),
+		ServiceNames:          toStringSlice(n.ServiceNames),
 	}
 	if n.ServiceNames != nil {
 		procLocalFree.Call(uintptr(unsafe.Pointer(n.ServiceNames)))
@@ -392,7 +389,9 @@ func newServiceNotify(n *SERVICE_NOTIFY) *ServiceNotify {
 	// The names of the created services have a '/' prefix to
 	// distinguish them from the names of the deleted services.
 	if s.NotificationTriggered == SERVICE_NOTIFY_CREATED {
-		s.ServiceNames = strings.TrimPrefix(s.ServiceNames, "/")
+		for i := 0; i < len(s.ServiceNames); i++ {
+			s.ServiceNames[i] = strings.TrimPrefix(s.ServiceNames[i], "/")
+		}
 	}
 	return s
 }

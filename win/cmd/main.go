@@ -4,25 +4,65 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
+	"time"
+
+	"golang.org/x/sys/windows/svc/mgr"
 
 	"monitor/win"
 )
 
+var (
+	_ = mgr.Mgr{}
+	_ = time.ANSIC
+)
+
+/*
+t := time.Now()
+	N := 100
+	for i := 0; i < N; i++ {
+		_, err = mgr.Update()
+		if err != nil {
+			Fatal(err)
+		}
+	}
+	d := time.Since(t)
+	fmt.Println(d, d/time.Duration(N))
+	return
+*/
+
 func main() {
-	mgr, err := win.NewManager()
+	m, err := win.NewManager()
 	if err != nil {
 		Fatal(err)
 	}
-	typ := win.SERVICE_WIN32_OWN_PROCESS |
+	const typ = win.SERVICE_WIN32_OWN_PROCESS |
 		win.SERVICE_WIN32_SHARE_PROCESS |
 		win.SERVICE_WIN32
 
-	procs, err := mgr.ListServices(typ)
+	// procs, err := m.ListServices(typ)
+	// if err != nil {
+	// 	Fatal(err)
+	// }
+	// for _, p := range procs {
+	// 	fmt.Println(p.ServiceName)
+	// }
+
+	fn := func(name string, _ *mgr.Config) bool {
+		return strings.Contains(strings.ToLower(name), "v")
+	}
+	m.AddFilters(fn)
+
+	_, err = m.Update()
 	if err != nil {
 		Fatal(err)
 	}
-	for _, p := range procs {
-		fmt.Println(p.ServiceName)
+
+	// for _, s := range svcs {
+	// 	fmt.Println(s)
+	// }
+	for _, s := range m.Services() {
+		fmt.Println(s)
 	}
 }
 

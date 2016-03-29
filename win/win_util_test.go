@@ -7,11 +7,18 @@ import (
 	"path/filepath"
 	"time"
 
+	svcpkg "golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
 func build(svcName string) (string, error) {
-	exePath := filepath.Join("testdata", "bin", svcName+".exe")
+	exepath, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		return "", err
+	}
+	baseDir := filepath.Dir(exepath)
+
+	exePath := filepath.Join(baseDir, "testdata", "bin", svcName+".exe")
 	if _, err := os.Stat(exePath); err == nil {
 		if err := os.Remove(exePath); err != nil {
 			return "", fmt.Errorf("removing previous exe (%s): %s", exePath, err)
@@ -61,18 +68,27 @@ func install(m *mgr.Mgr, name, exepath string, c mgr.Config) error {
 	return nil
 }
 
-func deleteService(m *mgr.Mgr, name string) error {
+func deleteService(m *mgr.Mgr, name string) (first error) {
 	s, err := m.OpenService(name)
 	if err != nil {
 		return fmt.Errorf("opening service (%s): %s", name, err)
 	}
+	if _, err := s.Control(svcpkg.Stop); err != nil {
+		if first == nil {
+			first = fmt.Errorf("stopping service (%s): %s", name, err)
+		}
+	}
 	if err := s.Delete(); err != nil {
-		return fmt.Errorf("delete service (%s): %s", name, err)
+		if first == nil {
+			first = fmt.Errorf("delete service (%s): %s", name, err)
+		}
 	}
 	if err := s.Close(); err != nil {
-		return fmt.Errorf("close service (%s): %s", name, err)
+		if first == nil {
+			first = fmt.Errorf("close service (%s): %s", name, err)
+		}
 	}
-	return nil
+	return first
 }
 
 func remove(s *mgr.Service) error {
