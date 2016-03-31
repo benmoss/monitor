@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"golang.org/x/sys/windows"
 	svcpkg "golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 
@@ -88,15 +87,14 @@ var _ = Describe("Manager", func() {
 		Expect(update.Name).To(Equal(svcName))
 
 		Expect(svc.Service.Delete()).To(Succeed())
-
 		Eventually(func() ServiceNotification {
 			update := <-svc.updates
 			return update.Notify.NotificationTriggered
 		}).Should(Equal(SERVICE_NOTIFY_DELETE_PENDING))
 
-		Eventually(func() error {
-			return windows.CloseHandle(svc.Service.Handle)
-		}).Should(HaveOccurred())
+		Eventually(func() bool {
+			return isValidHandle(svc.Service.Handle)
+		}).Should(BeFalse())
 
 		Expect(svc.closed()).To(BeTrue())
 	})

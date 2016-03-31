@@ -1,7 +1,6 @@
 package win
 
 import (
-	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
 
 	. "github.com/onsi/ginkgo"
@@ -43,7 +42,7 @@ var _ = Describe("Supervisor", func() {
 		Expect(svcs[0].Name).To(Equal(svcName))
 	})
 
-	It("should start monitoring the added service", func() {
+	It("starts monitoring added services", func() {
 		filter := func(_ string, conf *mgr.Config) bool {
 			return conf.Description == "vcap"
 		}
@@ -61,11 +60,41 @@ var _ = Describe("Supervisor", func() {
 
 		Eventually(func() string {
 			svcs := s.Services()
+			if len(svcs) > 0 {
+				return svcs[0].Name
+			}
+			return ""
+		}).Should(Equal(svcName))
+	})
+
+	It("removes services that have been deleted", func() {
+		manager, service, err := buildAndInstall(svcName, config)
+		Expect(err).ToNot(HaveOccurred())
+		service.Close()
+
+		defer manager.Disconnect()
+
+		filter := func(name string, _ *mgr.Config) bool {
+			return name == svcName
+		}
+		s, err := NewSupervisor(filter)
+		Expect(err).To(BeNil())
+		defer s.Close()
+
+		Eventually(func() string {
+			svcs := s.Services()
 			if len(svcs) == 1 {
 				return svcs[0].Name
 			}
 			return ""
 		}).Should(Equal(svcName))
+		svcs := s.Services()
+		handle := svcs[0].Service.Handle
+
+		deleteService(manager, svcName)
+
+		Eventually(s.Services).Should(BeEmpty())
+		Expect(isValidHandle(handle)).To(BeFalse())
 	})
 
 	Describe("Close", func() {
@@ -74,8 +103,7 @@ var _ = Describe("Supervisor", func() {
 			Expect(err).To(BeNil())
 			err = s.Close()
 			Expect(err).To(BeNil())
-			err = windows.CloseServiceHandle(s.scmListener.manager.Handle)
-			Expect(err).To(HaveOccurred())
+			Expect(isValidHandle(s.scmListener.manager.Handle)).To(BeFalse())
 		})
 
 		It("closes its ServiceListeners handles", func() {
@@ -84,17 +112,16 @@ var _ = Describe("Supervisor", func() {
 			aHandle := s.Services()[0].Service.Handle
 
 			err = s.Close()
-			err = windows.CloseServiceHandle(aHandle)
-			Expect(err).To(HaveOccurred())
+			Expect(isValidHandle(aHandle)).To(BeFalse())
 			Expect(s.Services()).To(BeEmpty())
 		})
+
 		It("closes its manager's handler", func() {
 			s, err := NewSupervisor(func(_ string, _ *mgr.Config) bool { return true })
 			Expect(err).To(BeNil())
 
 			err = s.Close()
-			err = windows.CloseServiceHandle(s.mgr.Handle)
-			Expect(err).To(HaveOccurred())
+			Expect(isValidHandle(s.mgr.Handle)).To(BeFalse())
 		})
 	})
 

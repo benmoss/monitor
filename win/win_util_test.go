@@ -3,11 +3,15 @@ package win
 import (
 	"errors"
 	"fmt"
+	"monitor/errno"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
+	"unsafe"
 
+	"golang.org/x/sys/windows"
 	svcpkg "golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
@@ -115,4 +119,24 @@ func remove(s *mgr.Service) error {
 		return fmt.Errorf("Delete failed: %s", err)
 	}
 	return nil
+}
+
+func isValidHandle(handle windows.Handle) bool {
+	var bytesNeeded uint32
+	_, _, e1 := syscall.Syscall6(
+		procQueryServiceConfigW.Addr(),
+		uintptr(4),
+		uintptr(handle),
+		uintptr(0),
+		uintptr(0),
+		uintptr(unsafe.Pointer(&bytesNeeded)),
+		uintptr(0),
+		uintptr(0),
+	)
+	switch e := errno.Errno(e1); e {
+	case errno.ERROR_INSUFFICIENT_BUFFER:
+		return true
+	default:
+		return false
+	}
 }

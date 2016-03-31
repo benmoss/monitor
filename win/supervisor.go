@@ -93,6 +93,10 @@ func (s *Supervisor) listenSCM() {
 					for _, name := range n.Notify.ServiceNames {
 						s.monitorService(name)
 					}
+				case SERVICE_NOTIFY_DELETED:
+					for _, name := range n.Notify.ServiceNames {
+						delete(s.serviceListeners, name)
+					}
 				}
 			}
 		}

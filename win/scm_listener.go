@@ -3,6 +3,7 @@ package win
 import (
 	"monitor/errno"
 	"strings"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -14,6 +15,8 @@ type SCMListener struct {
 
 	updates chan Notification
 	halt    chan struct{}
+	ready   chan bool
+	once    sync.Once
 }
 
 func newSCMListener() (*SCMListener, error) {
@@ -21,14 +24,18 @@ func newSCMListener() (*SCMListener, error) {
 	if err != nil {
 		return nil, err
 	}
-	scml := &SCMListener{
+	s := &SCMListener{
 		manager: mgr,
 
 		updates: make(chan Notification, 10),
 		halt:    make(chan struct{}),
+		ready:   make(chan bool, 1),
 	}
-	go scml.notifyStatusChange()
-	return scml, nil
+	go s.notifyStatusChange()
+	<-s.ready
+	close(s.ready)
+
+	return s, nil
 }
 
 func (s *SCMListener) notifyStatusChange() {
@@ -37,7 +44,7 @@ func (s *SCMListener) notifyStatusChange() {
 		Alertable          = 1
 		WAIT_IO_COMPLETION = 192
 	)
-	const mask = SERVICE_NOTIFY_CREATED
+	const mask = SERVICE_NOTIFY_CREATED | SERVICE_NOTIFY_DELETED
 
 	var notify *SERVICE_NOTIFY
 	callback := func(p uintptr) uintptr {
@@ -76,7 +83,7 @@ func (s *SCMListener) notifyStatusChange() {
 			s.notify(newServiceNotify(nil), act)
 			break
 		}
-
+		s.once.Do(func() { s.ready <- true })
 		r1, _, _ = syscall.Syscall(
 			procSleepEx.Addr(),
 			uintptr(2),
@@ -86,9 +93,6 @@ func (s *SCMListener) notifyStatusChange() {
 		)
 		if r1 == WAIT_IO_COMPLETION {
 			s.notify(newServiceNotify(notify), act)
-			if notify.NotificationTriggered == SERVICE_NOTIFY_DELETE_PENDING {
-				break
-			}
 		}
 	}
 }
