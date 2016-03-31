@@ -52,7 +52,6 @@ func (s *SCMListener) notifyStatusChange() {
 		NotifyCallback: syscall.NewCallback(callback),
 	}
 
-	defer s.Close()
 	for {
 		if s.closed() {
 			break
@@ -100,9 +99,9 @@ func (s *SCMListener) notify(n *ServiceNotify, act MonitorAction) {
 		name = strings.Join(n.ServiceNames, ",")
 	}
 	notify := Notification{
-		SvcName: name,
-		Notify:  n,
-		Action:  act,
+		Name:   name,
+		Notify: n,
+		Action: act,
 	}
 	s.updates <- notify
 }

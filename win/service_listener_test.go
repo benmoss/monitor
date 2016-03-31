@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/sys/windows"
 	svcpkg "golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 
@@ -27,28 +28,28 @@ var _ = Describe("Manager", func() {
 	}
 
 	var (
-		mgrMgr *mgr.Mgr
-		mgrSvc *mgr.Service
+		mgrMgr             *mgr.Mgr
+		mgrServiceListener *mgr.Service
 	)
 	BeforeEach(func() {
 		svcName = serviceName()
 		config.DisplayName = svcName
 
 		var err error
-		mgrMgr, mgrSvc, err = buildAndInstall(svcName, config)
+		mgrMgr, mgrServiceListener, err = buildAndInstall(svcName, config)
 		Expect(err).ToNot(HaveOccurred())
 	})
 
 	AfterEach(func() {
-		mgrSvc.Close()
+		mgrServiceListener.Close()
 		deleteService(mgrMgr, svcName)
 		mgrMgr.Disconnect()
 	})
 
 	It("should notify for status starting", func() {
-		svc := &Svc{
+		svc := &ServiceListener{
 			Name:    svcName,
-			Service: mgrSvc,
+			Service: mgrServiceListener,
 
 			updates: make(chan Notification, 1),
 			halt:    make(chan struct{}),
@@ -56,12 +57,12 @@ var _ = Describe("Manager", func() {
 		defer svc.Close()
 
 		// Start service
-		Expect(mgrSvc.Start()).To(Succeed())
+		Expect(mgrServiceListener.Start()).To(Succeed())
 
 		go svc.notifyStatusChange()
 
 		update := <-svc.updates
-		Expect(update.SvcName).To(Equal(svcName))
+		Expect(update.Name).To(Equal(svcName))
 
 		Expect(update.Notify.NotificationTriggered).To(Or(
 			Equal(SERVICE_NOTIFY_RUNNING),
@@ -71,9 +72,9 @@ var _ = Describe("Manager", func() {
 	})
 
 	It("should notify for status deleting", func() {
-		svc := &Svc{
+		svc := &ServiceListener{
 			Name:    svcName,
-			Service: mgrSvc,
+			Service: mgrServiceListener,
 
 			updates: make(chan Notification, 1),
 			halt:    make(chan struct{}),
@@ -84,7 +85,7 @@ var _ = Describe("Manager", func() {
 		Expect(svc.Service.Start()).To(Succeed())
 		go svc.notifyStatusChange()
 		update := <-svc.updates
-		Expect(update.SvcName).To(Equal(svcName))
+		Expect(update.Name).To(Equal(svcName))
 
 		Expect(svc.Service.Delete()).To(Succeed())
 
@@ -93,7 +94,9 @@ var _ = Describe("Manager", func() {
 			return update.Notify.NotificationTriggered
 		}).Should(Equal(SERVICE_NOTIFY_DELETE_PENDING))
 
-		Expect(int(svc.Service.Handle)).To(Equal(0))
+		Eventually(func() error {
+			return windows.CloseHandle(svc.Service.Handle)
+		}).Should(HaveOccurred())
 
 		Expect(svc.closed()).To(BeTrue())
 	})
@@ -121,15 +124,15 @@ var _ = Describe("Manager", func() {
 // 	})
 // 	Expect(err).ToNot(HaveOccurred())
 
-// 	testSvc, err := manager.mgr.OpenService(svcName)
+// 	testServiceListener, err := manager.mgr.OpenService(svcName)
 // 	Expect(err).ToNot(HaveOccurred())
-// 	defer remove(testSvc)
-// 	Expect(testSvc.Start()).To(Succeed())
+// 	defer remove(testServiceListener)
+// 	Expect(testServiceListener.Start()).To(Succeed())
 
 // 	Expect(manager.Monitor(svcName)).To(Succeed())
 // 	Eventually(func() ServiceState {
 // 		return manager.Services()[0].State
 // 	}).Should(Equal(SERVICE_RUNNING))
 
-// 	testSvc.Control(svc.Stop)
+// 	testServiceListener.Control(svc.Stop)
 // })

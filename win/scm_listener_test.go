@@ -38,7 +38,7 @@ var _ = Describe("SCMListener", func() {
 		})
 	})
 
-	It("should notify for status creating", func(done Done) {
+	It("should notify for status creating", func() {
 		scl, err := newSCMListener()
 		Expect(err).To(BeNil())
 		defer scl.Close()
@@ -57,8 +57,7 @@ var _ = Describe("SCMListener", func() {
 		}()
 
 		update := <-scl.updates
-		Expect(update.SvcName).To(Equal(svcName))
+		Expect(update.Name).To(Equal(svcName))
 		Expect(update.Notify.NotificationTriggered).To(Equal(SERVICE_NOTIFY_CREATED))
-		close(done)
-	}, 5.0)
+	})
 })

@@ -12,14 +12,15 @@ import (
 type Filter func(svcName string, conf *mgr.Config) bool
 
 type Supervisor struct {
-	mgr         *mgr.Mgr
-	mu          sync.RWMutex // svcs mutex
-	svcs        map[string]*Svc
-	filter      Filter
-	scmListener *SCMListener
+	mgr              *mgr.Mgr
+	filter           Filter
+	serviceListeners map[string]*ServiceListener
+	scmListener      *SCMListener
 
 	updates chan Notification
 	halt    chan struct{}
+
+	mu sync.RWMutex // serviceListeners mutex
 }
 
 func NewSupervisor(filter Filter) (*Supervisor, error) {
@@ -32,15 +33,15 @@ func NewSupervisor(filter Filter) (*Supervisor, error) {
 		return nil, err
 	}
 	s := &Supervisor{
-		mgr:         mgr,
-		svcs:        make(map[string]*Svc),
-		filter:      filter,
-		scmListener: scmListener,
+		mgr:              mgr,
+		filter:           filter,
+		serviceListeners: make(map[string]*ServiceListener),
+		scmListener:      scmListener,
 
 		updates: make(chan Notification, 200),
 		halt:    make(chan struct{}, 1),
 	}
-	if err := s.updateSvcs(); err != nil {
+	if err := s.updateServiceListeners(); err != nil {
 		return nil, err
 	}
 	go s.listenSCM()
@@ -53,12 +54,12 @@ func (s *Supervisor) Close() error {
 		return err
 	}
 	s.mu.Lock()
-	for name, svc := range s.svcs {
+	for name, svc := range s.serviceListeners {
 		err = svc.Close()
 		if err != nil {
 			return err
 		}
-		delete(s.svcs, name)
+		delete(s.serviceListeners, name)
 	}
 	s.mu.Unlock()
 	err = s.mgr.Disconnect()
@@ -99,30 +100,30 @@ func (s *Supervisor) listenSCM() {
 }
 
 // WARN: DEV ONLY
-// func (s *Supervisor) Update() ([]*Svc, error) {
-// if err := s.updateSvcs(); err != nil {
+// func (s *Supervisor) Update() ([]*ServiceListener, error) {
+// if err := s.updateServiceListeners(); err != nil {
 // return nil, err
 // }
-// svcs := make([]*Svc, 0, len(s.svcs))
-// for _, s := range s.svcs {
-// svcs = append(svcs, s)
+// serviceListeners := make([]*ServiceListener, 0, len(s.serviceListeners))
+// for _, s := range s.serviceListeners {
+// serviceListeners = append(serviceListeners, s)
 // }
-// return svcs, nil
+// return serviceListeners, nil
 // }
 
-func (s *Supervisor) Services() []Svc {
+func (s *Supervisor) Services() []ServiceListener {
 	s.mu.RLock()
-	svcs := make([]Svc, 0, len(s.svcs))
-	for _, s := range s.svcs {
+	serviceListeners := make([]ServiceListener, 0, len(s.serviceListeners))
+	for _, s := range s.serviceListeners {
 		if s != nil {
-			svcs = append(svcs, *s)
+			serviceListeners = append(serviceListeners, *s)
 		}
 	}
 	s.mu.RUnlock()
-	return svcs
+	return serviceListeners
 }
 
-func (s *Supervisor) updateSvcs() error {
+func (s *Supervisor) updateServiceListeners() error {
 	// // TODO: Cleanup
 	procs, err := s.listServices(SERVICE_WIN32)
 	if err != nil {
@@ -139,10 +140,10 @@ func (s *Supervisor) updateSvcs() error {
 
 	// // Remove not seen
 	// s.mu.Lock()
-	// for _, svc := range s.svcs {
+	// for _, svc := range s.serviceListeners {
 	// if !seen[svc.Name] {
 	// svc.Close()
-	// delete(s.svcs, svc.Name)
+	// delete(s.serviceListeners, svc.Name)
 	// }
 	// }
 	// s.mu.Unlock()
@@ -172,14 +173,14 @@ func (s *Supervisor) monitorService(svcName string) error {
 		return nil
 	}
 	s.mu.Lock()
-	s.svcs[svc.Name] = newSvc(svc.Name, svc)
+	s.serviceListeners[svc.Name] = newServiceListener(svc.Name, svc)
 	s.mu.Unlock()
 	return nil
 }
 
 // func (s *Supervisor) unmonitorService(svcName string) (err error) {
 // s.mu.Lock()
-// if svc := s.svcs[svcName]; svc != nil {
+// if svc := s.serviceListeners[svcName]; svc != nil {
 // err = svc.Close()
 // }
 // s.mu.Unlock()
@@ -287,9 +288,9 @@ func (s *Supervisor) listServices(typ ServiceType) ([]EnumServiceStatusProcess, 
 	return procs, nil
 }
 
-// func (s *Supervisor) updateSvcState(svcName string, state ServiceNotification) {
+// func (s *Supervisor) updateServiceListenerState(svcName string, state ServiceNotification) {
 // s.mu.Lock()
-// if svc := s.svcs[svcName]; svc != nil {
+// if svc := s.serviceListeners[svcName]; svc != nil {
 // svc.State = state
 // }
 // s.mu.Unlock()
@@ -310,21 +311,21 @@ func (s *Supervisor) listServices(typ ServiceType) ([]EnumServiceStatusProcess, 
 
 // case SERVICE_NOTIFY_DELETED:
 // for _, name := range n.Notify.ServiceNames {
-// s.updateSvcState(name, SERVICE_NOTIFY_DELETED)
+// s.updateServiceListenerState(name, SERVICE_NOTIFY_DELETED)
 // s.unmonitorService(name)
 // }
 
 // // Service Notifications.
 // default:
-// s.updateSvcState(n.SvcName, n.Notify.NotificationTriggered)
+// s.updateServiceListenerState(n.Name, n.Notify.NotificationTriggered)
 // }
 
 // case ActionDelete:
-// s.unmonitorService(n.SvcName)
+// s.unmonitorService(n.Name)
 
 // case ActionReload:
-// s.unmonitorService(n.SvcName)
-// s.monitorService(n.SvcName)
+// s.unmonitorService(n.Name)
+// s.monitorService(n.Name)
 // }
 // }
 // }()
