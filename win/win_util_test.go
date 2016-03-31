@@ -1,6 +1,7 @@
 package win
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -68,27 +69,43 @@ func install(m *mgr.Mgr, name, exepath string, c mgr.Config) error {
 	return nil
 }
 
-func deleteService(m *mgr.Mgr, name string) (first error) {
+func buildAndInstall(svcName string, conf mgr.Config) (*mgr.Mgr, *mgr.Service, error) {
+	exePath, err := build(svcName)
+	if err != nil {
+		return nil, nil, err
+	}
+	m, err := mgr.Connect()
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := install(m, svcName, exePath, conf); err != nil {
+		m.Disconnect()
+		return nil, nil, err
+	}
+	s, err := m.OpenService(svcName)
+	if err != nil {
+		m.Disconnect()
+		return nil, nil, err
+	}
+	return m, s, nil
+}
+
+func deleteService(m *mgr.Mgr, name string) error {
+	errors := errors.New("")
 	s, err := m.OpenService(name)
 	if err != nil {
-		return fmt.Errorf("opening service (%s): %s", name, err)
+		errors = fmt.Errorf("opening service (%s): %s", name, err)
 	}
 	if _, err := s.Control(svcpkg.Stop); err != nil {
-		if first == nil {
-			first = fmt.Errorf("stopping service (%s): %s", name, err)
-		}
+		errors = fmt.Errorf("%s- stopping service (%s): %s", errors.Error(), name, err)
 	}
 	if err := s.Delete(); err != nil {
-		if first == nil {
-			first = fmt.Errorf("delete service (%s): %s", name, err)
-		}
+		errors = fmt.Errorf("%s- delete service (%s): %s", errors.Error(), name, err)
 	}
 	if err := s.Close(); err != nil {
-		if first == nil {
-			first = fmt.Errorf("close service (%s): %s", name, err)
-		}
+		errors = fmt.Errorf("%s- close service (%s): %s", errors.Error(), name, err)
 	}
-	return first
+	return errors
 }
 
 func remove(s *mgr.Service) error {
