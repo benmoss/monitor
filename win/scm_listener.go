@@ -1,6 +1,7 @@
 package win
 
 import (
+	"fmt"
 	"monitor/errno"
 	"strings"
 	"sync"
@@ -32,8 +33,8 @@ func newSCMListener() (*SCMListener, error) {
 		ready:   make(chan bool, 1),
 	}
 	go s.notifyStatusChange()
-	<-s.ready
-	close(s.ready)
+	// <-s.ready
+	// close(s.ready)
 
 	return s, nil
 }
@@ -44,7 +45,9 @@ func (s *SCMListener) notifyStatusChange() {
 		Alertable          = 1
 		WAIT_IO_COMPLETION = 192
 	)
-	const mask = SERVICE_NOTIFY_CREATED | SERVICE_NOTIFY_DELETED
+	mask := SERVICE_NOTIFY_CREATED | SERVICE_NOTIFY_DELETED
+	//mask := SERVICE_NOTIFY_CREATED
+	fmt.Println("THE MASK", uintptr(mask))
 
 	var notify *SERVICE_NOTIFY
 	callback := func(p uintptr) uintptr {
@@ -63,6 +66,7 @@ func (s *SCMListener) notifyStatusChange() {
 		if s.closed() {
 			break
 		}
+		fmt.Println("HANDLE:", s.manager.Handle)
 		r1, _, _ := syscall.Syscall(
 			procNotifyServiceStatusChange.Addr(),
 			3,
@@ -83,7 +87,7 @@ func (s *SCMListener) notifyStatusChange() {
 			s.notify(newServiceNotify(nil), act)
 			break
 		}
-		s.once.Do(func() { s.ready <- true })
+		//s.once.Do(func() { s.ready <- true })
 		r1, _, _ = syscall.Syscall(
 			procSleepEx.Addr(),
 			uintptr(2),
@@ -91,6 +95,7 @@ func (s *SCMListener) notifyStatusChange() {
 			uintptr(Alertable),
 			uintptr(0),
 		)
+		fmt.Println("Woke up")
 		if r1 == WAIT_IO_COMPLETION {
 			s.notify(newServiceNotify(notify), act)
 		}

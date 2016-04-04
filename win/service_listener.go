@@ -2,6 +2,9 @@ package win
 
 import (
 	"fmt"
+	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -43,11 +46,15 @@ func (s *ServiceListener) closed() bool {
 }
 
 func (s *ServiceListener) Close() (err error) {
-	if !s.closed() {
+	if !s.closed() && s.halt != nil {
+		fmt.Println("Before s.halt:", s.halt)
 		close(s.halt)
+		fmt.Println("After s.halt:", s.halt)
 	}
 	if s.Service != nil {
+		fmt.Println("closing service", goid())
 		err = s.Service.Close()
+		fmt.Println("closed service", goid())
 	}
 	return err
 }
@@ -73,6 +80,17 @@ func (s *ServiceListener) notify(n *ServiceNotify, act MonitorAction) {
 			fmt.Printf("Notify Timout: %+v\n", notify)
 		}
 	}
+}
+
+func goid() int {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	idField := strings.Fields(strings.TrimPrefix(string(buf[:n]), "goroutine "))[0]
+	id, err := strconv.Atoi(idField)
+	if err != nil {
+		panic(fmt.Sprintf("cannot get goroutine id: %v", err))
+	}
+	return id
 }
 
 func (s *ServiceListener) notifyStatusChange() {
@@ -101,9 +119,12 @@ func (s *ServiceListener) notifyStatusChange() {
 
 	defer s.Close()
 	for {
+		fmt.Println("ServiceListener called", goid())
 		if s.closed() {
+			fmt.Println("ServiceListener closed", goid())
 			break
 		}
+		fmt.Println("ServiceListener not closed", s.Service.Handle, goid())
 		r1, _, _ := syscall.Syscall(
 			procNotifyServiceStatusChange.Addr(),
 			3,
@@ -120,6 +141,7 @@ func (s *ServiceListener) notifyStatusChange() {
 		}
 		if act != ActionSuccess {
 			s.notify(newServiceNotify(nil), act)
+			fmt.Println("ServiceListener Not ActionSuccess")
 			break
 		}
 
@@ -130,9 +152,11 @@ func (s *ServiceListener) notifyStatusChange() {
 			uintptr(Alertable),
 			uintptr(0),
 		)
+		fmt.Println("ServiceListener woke up")
 		if r1 == WAIT_IO_COMPLETION {
 			s.notify(newServiceNotify(notify), act)
 			if notify.NotificationTriggered == SERVICE_NOTIFY_DELETE_PENDING {
+				fmt.Println("ServiceListener is deleting")
 				break
 			}
 		}

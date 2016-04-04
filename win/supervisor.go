@@ -1,6 +1,7 @@
 package win
 
 import (
+	"fmt"
 	"monitor/errno"
 	"sync"
 	"syscall"
@@ -24,14 +25,21 @@ type Supervisor struct {
 }
 
 func NewSupervisor(filter Filter) (*Supervisor, error) {
+	fmt.Println("NewSupervisor", 1)
 	mgr, err := mgr.Connect()
+	fmt.Println("NewSupervisor", 2)
 	if err != nil {
+		fmt.Println("err connecting")
 		return nil, err
 	}
+	fmt.Println("NewSupervisor", 3)
 	scmListener, err := newSCMListener()
+	fmt.Println("NewSupervisor", 4)
 	if err != nil {
+		fmt.Println("err making a newSCMListener")
 		return nil, err
 	}
+	fmt.Println("NewSupervisor", 5)
 	s := &Supervisor{
 		mgr:              mgr,
 		filter:           filter,
@@ -42,9 +50,12 @@ func NewSupervisor(filter Filter) (*Supervisor, error) {
 		halt:    make(chan struct{}, 1),
 	}
 	if err := s.updateServiceListeners(); err != nil {
+		fmt.Println("err updateServiceListeners")
 		return nil, err
 	}
+	fmt.Println("NewSupervisor", 6)
 	go s.listenSCM()
+	fmt.Println("NewSupervisor", 7)
 	return s, nil
 }
 
@@ -128,19 +139,26 @@ func (s *Supervisor) Services() []ServiceListener {
 }
 
 func (s *Supervisor) updateServiceListeners() error {
-	// // TODO: Cleanup
+	fmt.Println("updateServiceListeners", 1)
+	// TODO: Cleanup
 	procs, err := s.listServices(SERVICE_WIN32)
+	fmt.Println("updateServiceListeners", 2)
 	if err != nil {
+		fmt.Println("err listServices")
 		return err
 	}
 
 	// seen := make(map[string]bool, len(procs))
+	fmt.Println("updateServiceListeners", 3)
 	for _, p := range procs {
 		// seen[p.ServiceName] = true
+		fmt.Println("updateServiceListeners", 4, p.ServiceName)
 		if err := s.monitorService(p.ServiceName); err != nil {
+			fmt.Println("err monitorService", p.ServiceName)
 			return err
 		}
 	}
+	fmt.Println("updateServiceListeners", 5)
 
 	// // Remove not seen
 	// s.mu.Lock()
@@ -159,19 +177,28 @@ func (s *Supervisor) monitorService(svcName string) error {
 	// TODO: Cleanup
 	const ERROR_ACCESS_DENIED = syscall.Errno(errno.ERROR_ACCESS_DENIED)
 
+	fmt.Println("monitorService", 1)
+
 	svc, err := s.mgr.OpenService(svcName)
+	fmt.Println("monitorService", 2)
 	if err != nil {
 		if err == ERROR_ACCESS_DENIED {
 			return nil
 		}
+		fmt.Println("openService failed")
 		return err
 	}
+	fmt.Println("monitorService", 3)
 
 	conf, err := svc.Config()
+	fmt.Println("monitorService", 4)
 	if err != nil {
+		fmt.Println("monitorService", 5)
 		svc.Close()
+		fmt.Println("svc.Config failed")
 		return err
 	}
+	fmt.Println("monitorService", 6)
 	if !s.filter(svc.Name, &conf) {
 		svc.Close()
 		return nil

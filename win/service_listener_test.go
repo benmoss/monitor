@@ -17,7 +17,7 @@ func serviceName() string {
 	return fmt.Sprintf("test-%d", time.Now().UnixNano())
 }
 
-var _ = Describe("Manager", func() {
+var _ = Describe("ServiceListener", func() {
 	const description = "vcap"
 	var (
 		svcName string
@@ -27,28 +27,29 @@ var _ = Describe("Manager", func() {
 	}
 
 	var (
-		mgrMgr             *mgr.Mgr
-		mgrServiceListener *mgr.Service
+		mgrMgr  *mgr.Mgr
+		service *mgr.Service
 	)
 	BeforeEach(func() {
 		svcName = serviceName()
 		config.DisplayName = svcName
 
 		var err error
-		mgrMgr, mgrServiceListener, err = buildAndInstall(svcName, config)
+		mgrMgr, service, err = buildAndInstall(svcName, config)
 		Expect(err).ToNot(HaveOccurred())
 	})
 
-	AfterEach(func() {
-		mgrServiceListener.Close()
-		deleteService(mgrMgr, svcName)
-		mgrMgr.Disconnect()
-	})
+	// AfterEach(func() {
+	// service.Close()
+	// //deleteService(mgrMgr, svcName)
+	// mgrMgr.Disconnect()
+	// })
 
-	It("should notify for status starting", func() {
+	FIt("should notify for status starting", func() {
+		svc := newServiceListener(svcName, &service)
 		svc := &ServiceListener{
 			Name:    svcName,
-			Service: mgrServiceListener,
+			Service: service,
 
 			updates: make(chan Notification, 1),
 			halt:    make(chan struct{}),
@@ -56,7 +57,13 @@ var _ = Describe("Manager", func() {
 		defer svc.Close()
 
 		// Start service
-		Expect(mgrServiceListener.Start()).To(Succeed())
+		Expect(service.Start()).To(Succeed())
+
+		defer func() {
+			service.Close()
+			deleteService(mgrMgr, svcName)
+			mgrMgr.Disconnect()
+		}()
 
 		go svc.notifyStatusChange()
 
@@ -70,15 +77,19 @@ var _ = Describe("Manager", func() {
 
 	})
 
-	It("should notify for status deleting", func() {
+	XIt("should notify for status deleting", func() {
 		svc := &ServiceListener{
 			Name:    svcName,
-			Service: mgrServiceListener,
+			Service: service,
 
 			updates: make(chan Notification, 1),
 			halt:    make(chan struct{}),
 		}
 		defer svc.Close()
+
+		defer func() {
+			mgrMgr.Disconnect()
+		}()
 
 		// Start service
 		Expect(svc.Service.Start()).To(Succeed())
@@ -86,7 +97,9 @@ var _ = Describe("Manager", func() {
 		update := <-svc.updates
 		Expect(update.Name).To(Equal(svcName))
 
-		Expect(svc.Service.Delete()).To(Succeed())
+		service.Close()
+		deleteService(mgrMgr, svcName)
+		//Expect(svc.Service.Delete()).To(Succeed())
 		Eventually(func() ServiceNotification {
 			update := <-svc.updates
 			return update.Notify.NotificationTriggered

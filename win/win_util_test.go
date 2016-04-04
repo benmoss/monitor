@@ -16,53 +16,43 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
+var exePath string
+
 func build(svcName string) (string, error) {
-	exepath, err := filepath.Abs(os.Args[0])
-	if err != nil {
-		return "", err
-	}
-	baseDir := filepath.Dir(exepath)
-
-	exePath := filepath.Join(baseDir, "testdata", "bin", svcName+".exe")
-	if _, err := os.Stat(exePath); err == nil {
-		if err := os.Remove(exePath); err != nil {
-			return "", fmt.Errorf("removing previous exe (%s): %s", exePath, err)
+	if exePath == "" {
+		exepath, err := filepath.Abs(os.Args[0])
+		if err != nil {
+			return "", err
 		}
-	}
+		baseDir := filepath.Dir(exepath)
 
-	args := []string{
-		"build",
-		"-o", exePath,
-		"-ldflags", fmt.Sprintf("-X main.svcName=%s", svcName),
-		filepath.Join("testdata", "service.go"),
-	}
-
-	out, err := exec.Command("go", args...).CombinedOutput()
-	if err != nil {
-		if len(out) == 0 {
-			return "", fmt.Errorf("building exe (%s): %s", args, err)
+		exePath = filepath.Join(baseDir, "testdata", "bin", svcName+".exe")
+		if _, err := os.Stat(exePath); err == nil {
+			if err := os.Remove(exePath); err != nil {
+				return "", fmt.Errorf("removing previous exe (%s): %s", exePath, err)
+			}
 		}
-		return "", fmt.Errorf("building exe (%s): %s\noutput:\n%s", args, err, out)
+
+		args := []string{
+			"build",
+			"-o", exePath,
+			"-ldflags", fmt.Sprintf("-X main.svcName=%s", svcName),
+			filepath.Join("testdata", "service.go"),
+		}
+
+		out, err := exec.Command("go", args...).CombinedOutput()
+		if err != nil {
+			if len(out) == 0 {
+				return "", fmt.Errorf("building exe (%s): %s", args, err)
+			}
+			return "", fmt.Errorf("building exe (%s): %s\noutput:\n%s", args, err, out)
+		}
 	}
 
 	return exePath, nil
 }
 
 func install(m *mgr.Mgr, name, exepath string, c mgr.Config) error {
-	// Sometimes it takes a while for the service to get
-	// removed after previous test run.
-	for i := 0; ; i++ {
-		s, err := m.OpenService(name)
-		if err != nil {
-			break
-		}
-		s.Close()
-
-		if i > 10 {
-			return fmt.Errorf("service %s already exists", name)
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
 
 	s, err := m.CreateService(name, exepath, c)
 	if err != nil {
@@ -82,6 +72,7 @@ func buildAndInstall(svcName string, conf mgr.Config) (*mgr.Mgr, *mgr.Service, e
 	if err != nil {
 		return nil, nil, err
 	}
+	fmt.Println("installing", svcName)
 	if err := install(m, svcName, exePath, conf); err != nil {
 		m.Disconnect()
 		return nil, nil, err
@@ -100,14 +91,27 @@ func deleteService(m *mgr.Mgr, name string) error {
 	if err != nil {
 		errors = fmt.Errorf("opening service (%s): %s", name, err)
 	}
+	defer s.Close()
 	if _, err := s.Control(svcpkg.Stop); err != nil {
 		errors = fmt.Errorf("%s- stopping service (%s): %s", errors.Error(), name, err)
 	}
 	if err := s.Delete(); err != nil {
 		errors = fmt.Errorf("%s- delete service (%s): %s", errors.Error(), name, err)
 	}
-	if err := s.Close(); err != nil {
-		errors = fmt.Errorf("%s- close service (%s): %s", errors.Error(), name, err)
+
+	// Sometimes it takes a while for the service to get
+	// removed after previous test run.
+	for i := 0; ; i++ {
+		s, err := m.OpenService(name)
+		if err != nil { // service has been deleted!
+			break
+		}
+		s.Close()
+
+		if i > 10 {
+			return fmt.Errorf("service %s already exists", name)
+		}
+		time.Sleep(300 * time.Millisecond)
 	}
 	return errors
 }
